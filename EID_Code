@@ -1,0 +1,173 @@
+13
+SQL Code
+/*Please note that the data in this table is fictional and does not represent the actual capability of a particular unit*/
+--CREATE Base Table Structure
+CREATE TABLE Unit_Equipment
+(LIN varchar(20) Not Null,
+Nomenclature varchar(100) Not Null,
+Service_Date DATETIME Not Null,
+CONSTRAINT Unit_Equipment_PK PRIMARY KEY (LIN));
+CREATE TABLE SECTIONS
+(PARNO INT Not NULL,
+PARTITLE varchar(100) Not Null,
+SECTION varchar(20) Not Null,
+LIN varchar(20) Not Null,
+CONSTRAINT SECTIONS_PK PRIMARY KEY (PARNO),
+CONSTRAINT SECTIONS_FK1 FOREIGN KEY (LIN) References UNIT_Equipment(LIN));
+CREATE TABLE Storage_Loc
+(LocationID varchar(20) Not Null,
+Location_Desc varchar(50) Not Null,
+Key_Number varchar(5) Not Null,
+CONSTRAINT Storage_Loc_PK PRIMARY KEY (LocationID));
+CREATE TABLE ALLOCATIONS
+(LIN varchar(20) Not Null,
+PARNO int Not Null,
+REQ int Not Null,
+AUTH int Not Null,
+Assigned int Not Null,
+Serial_Number int Not Null,
+CONSTRAINT AllocationS_PK PRIMARY KEY (LIN));
+--Add columns to Equipment Table Describing equipment
+ALTER TABLE dbo.Unit_Equipment
+ADD Equipment_Type varchar(100) Not Null;
+ALTER TABLE dbo.Unit_Equipment
+ADD Equipment_DESC varchar(100);
+--INSERT Data from imported equipment CSV file
+INSERT INTO dbo.Unit_Equipment (LIN,Nomenclature,Equipment_Type,Equipment_Desc,Service_Date)
+SELECT DISTINCT(a.LIN)
+,a.Nomenclature
+,a.Equipment_Type
+,a.Equipment_Desc
+,a.Service_Date
+FROM dbo.ACO_EQUIPMENT_DETAILS a;
+INSERT INTO dbo.SECTIONS (PARNO,PARTITLE,SECTION,LIN)
+SELECT a.PARNO
+,a.PARATITLE
+,a.SECTION
+,a.LIN
+14
+FROM dbo.ACO_EQUIPMENT_DETAILS a;
+--Add additional columns to tables for more filtering options
+ALTER TABLE dbo.Storage_Loc
+ADD LIN varchar(20) Not Null;
+ALTER TABLE dbo.Sections
+ADD NIIN varchar(20);
+INSERT INTO dbo.Storage_Loc (LocationID, Location_Desc, Key_Number,LIN)
+SELECT a.LocationID
+,a.Location_DESC
+,a.Key_Number
+,a.LIN
+FROM dbo.ACO_EQUIPMENT_DETAILS a;
+INSERT INTO dbo.Allocations (LIN,PARNO,REQ,AUTH,Assigned,Serial_Number)
+SELECT a.LIN
+,a.PARNO
+,a.REQ
+,a.AUTH
+,a.Assigned
+,a.Serial_Number
+FROM dbo.ACO_EQUIPMENT_DETAILS a;
+--CREATE VIEW of Section Equipment
+CREATE VIEW [Section_Equipment]
+AS
+Select s.PARNO
+,s.Section
+,a.Serial_Number
+,s.LIN
+,l.Location_Desc
+,l.Key_Number
+,e.Nomenclature
+,e.Equipment_Type
+,d.NIIN
+From dbo.SECTIONS s
+Join dbo.ALLOCATIONS a on s.PARNO = a.PARNO
+JOIN dbo.Storage_Loc l on l.lin = s.lin
+Join dbo.Unit_Equipment e on e.lin = s.lin
+JOIN dbo.ACO_EQUIPMENT_DETAILS d on d.parno = s.parno;
+---CREATE PROCEDURE For all Equipment under a Specific NIIN
+CREATE PROCEDURE Select_SerialNumbers @NIIN nvarchar(20)
+AS
+SELECT * FROM dbo.Section_Equipment WHERE NIIN = @NIIN
+GO;
+Execute Select_SerialNumbers @NIIN = 'N05482'
+--Selects all equipment, serial numbers, and locations for a specific section
+CREATE PROCEDURE Select_Section @Section varchar(20)
+AS
+SELECT * FROM dbo.Section_Equipment WHERE Section = @Section
+GO;
+15
+Execute Select_Section @Section = 'Co_HQ'
+---Add maintenance requirements info
+Alter Table dbo.Unit_Equipment
+Add Service_Type varchar(50)
+Alter Table dbo.Unit_Equipment
+Add Due varchar(50)
+--Identify when a piece of equipment is due for service
+UPDATE dbo.Unit_Equipment
+SET Service_Type = 'COMPLETED'
+WHERE datediff(d,GetDate(),Service_Date)<1
+UPDATE dbo.Unit_Equipment
+SET Service_Type = 'IMMEDIATE'
+WHERE datediff(d,GetDate(),Service_Date) between 1 and 60
+UPDATE dbo.Unit_Equipment
+SET Service_Type = 'SCHEDULED'
+WHERE datediff(d,GetDate(),Service_Date)>60
+UPDATE dbo.Unit_Equipment
+SET Due = 'YES'
+WHERE datediff(d,GetDate(),Service_Date) between 1 and 60
+UPDATE dbo.Unit_Equipment
+SET Due = 'NO'
+WHERE datediff(d,GetDate(),Service_Date)>60 or Service_Type = 'COMPLETED'
+Select * From dbo.Unit_Equipment
+---Find Where all AN/PSC-5 Radio sets are located and which sections own them
+SELECT s.Section
+,e.Nomenclature
+,a.Serial_Number
+,l.Location_Desc
+From dbo.Sections s
+JOIN dbo.Storage_Loc l ON l.LIN = s.LIN
+JOIN dbo.Unit_Equipment e ON e.LIN = s.LIN
+JOIN dbo.Allocations a ON a.LIN = s.LIN
+Where e.Equipment_DESC = 'AN/PSC-5'
+--Identify how many Night Vision Goggles each section owns
+Select se.Section
+,count(se.Serial_Number) as total_NVGs
+From dbo.Section_Equipment se
+Where se.NIIN = 'N05482'
+Group By Section
+16
+--How many masks have completed scheduled services?
+Select se.Section
+,count(se.Serial_Number) as total_masks
+From dbo.Section_Equipment se
+JOIN dbo.Unit_Equipment e ON e.LIN = se.LIN
+Where se.NIIN = 'M12986' and e.Service_Type ='COMPLETED'
+Group By Section
+--Which equipment is in BUILDING 4, CAGE 8, who owns it and when is it due for service?
+SELECT se.Section
+,se.Nomenclature
+,se.Serial_Number
+,e.Service_Date
+,se.NIIN
+,l.key_number
+FROM dbo.Section_Equipment se
+JOIN dbo.Unit_Equipment e ON e.LIN = se.LIN
+JOIN dbo.Storage_Loc l ON l.LIN = se.LIN
+Join dbo.ACO_EQUIPMENT_DETAILS d ON d.LIN = se.LIN
+WHERE d.LOCATION_Abv = 'C8'
+--Which pieces of equipment are sentitive items?
+SELECT *
+From dbo.Section_Equipment
+Where left([NIIN],1) in ('A','M','R','P')
+---Who owns the missing equipment?
+SELECT PARNO, Section, Serial_Number
+FROM dbo.Section_Equipment se
+Where se.Serial_Number in
+('877223737'
+,'877742995'
+,'878175710'
+,'878694968'
+,'879214226'
+,'879820027'
+,'880512371'
+,'881464344'
+,'882329774')
